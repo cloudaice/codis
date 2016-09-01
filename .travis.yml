@@ -1,0 +1,12 @@
+language: go
+
+go:
+    - 1.5.4
+    - 1.6.3
+    - tip
+
+install:
+    - make
+
+script:
+    - make gotest

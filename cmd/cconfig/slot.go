@@ -1,38 +1,34 @@
-// Copyright 2014 Wandoujia Inc. All Rights Reserved.
+// Copyright 2016 CodisLabs. All Rights Reserved.
 // Licensed under the MIT (MIT-LICENSE.txt) license.
 
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
-	"time"
-
-	"github.com/juju/errors"
-	"github.com/wandoulabs/codis/pkg/models"
 
 	"github.com/docopt/docopt-go"
-	log "github.com/ngaut/logging"
-	"github.com/nu7hatch/gouuid"
+
+	"github.com/CodisLabs/codis/pkg/utils/errors"
+	"github.com/CodisLabs/codis/pkg/utils/log"
 )
 
 func cmdSlot(argv []string) (err error) {
 	usage := `usage:
-	cconfig slot init [-f]
-	cconfig slot info <slot_id>
-	cconfig slot set <slot_id> <group_id> <status>
-	cconfig slot range-set <slot_from> <slot_to> <group_id> <status>
-	cconfig slot migrate <slot_from> <slot_to> <group_id> [--delay=<delay_time_in_ms>]
-	cconfig slot rebalance [--delay=<delay_time_in_ms>]
+	codis-config slot init [-f]
+	codis-config slot info <slot_id>
+	codis-config slot set <slot_id> <group_id> <status>
+	codis-config slot range-set <slot_from> <slot_to> <group_id> <status>
+	codis-config slot migrate <slot_from> <slot_to> <group_id> [--delay=<delay_time_in_ms>]
+	codis-config slot rebalance [--delay=<delay_time_in_ms>]
 `
 
 	args, err := docopt.Parse(usage, argv, true, "", false)
 	if err != nil {
-		log.Error(err)
+		log.ErrorErrorf(err, "parse args failed")
 		return errors.Trace(err)
 	}
-	log.Debug(args)
+	log.Debugf("parse args = {%+v}", args)
 
 	// no need to lock here
 	// locked in runmigratetask
@@ -42,19 +38,19 @@ func cmdSlot(argv []string) (err error) {
 		if args["--delay"] != nil {
 			delay, err = strconv.Atoi(args["--delay"].(string))
 			if err != nil {
-				log.Warning(err)
+				log.ErrorErrorf(err, "parse <group_id> failed")
 				return errors.Trace(err)
 			}
 		}
 		slotFrom, err := strconv.Atoi(args["<slot_from>"].(string))
 		if err != nil {
-			log.Warning(err)
+			log.ErrorErrorf(err, "parse <slot_from> failed")
 			return errors.Trace(err)
 		}
 
 		slotTo, err := strconv.Atoi(args["<slot_to>"].(string))
 		if err != nil {
-			log.Warning(err)
+			log.ErrorErrorf(err, "parse <slot_to> failed")
 			return errors.Trace(err)
 		}
 		return runSlotMigrate(slotFrom, slotTo, groupId, delay)
@@ -64,20 +60,12 @@ func cmdSlot(argv []string) (err error) {
 		if args["--delay"] != nil {
 			delay, err = strconv.Atoi(args["--delay"].(string))
 			if err != nil {
-				log.Warning(err)
+				log.ErrorErrorf(err, "parse <delay> failed")
 				return errors.Trace(err)
 			}
 		}
 		return runRebalance(delay)
 	}
-
-	zkLock.Lock(fmt.Sprintf("slot, %+v", argv))
-	defer func() {
-		err := zkLock.Unlock()
-		if err != nil {
-			log.Error(err)
-		}
-	}()
 
 	if args["init"].(bool) {
 		force := args["-f"].(bool)
@@ -87,7 +75,7 @@ func cmdSlot(argv []string) (err error) {
 	if args["info"].(bool) {
 		slotId, err := strconv.Atoi(args["<slot_id>"].(string))
 		if err != nil {
-			log.Warning(err)
+			log.ErrorErrorf(err, "parse <slot_id> failed")
 			return errors.Trace(err)
 		}
 		return runSlotInfo(slotId)
@@ -95,7 +83,7 @@ func cmdSlot(argv []string) (err error) {
 
 	groupId, err := strconv.Atoi(args["<group_id>"].(string))
 	if err != nil {
-		log.Warning(err)
+		log.ErrorErrorf(err, "parse <group_id> failed")
 		return errors.Trace(err)
 	}
 
@@ -103,7 +91,7 @@ func cmdSlot(argv []string) (err error) {
 		slotId, err := strconv.Atoi(args["<slot_id>"].(string))
 		status := args["<status>"].(string)
 		if err != nil {
-			log.Warning(err)
+			log.ErrorErrorf(err, "parse <slot_id> failed")
 			return errors.Trace(err)
 		}
 		return runSlotSet(slotId, groupId, status)
@@ -113,102 +101,86 @@ func cmdSlot(argv []string) (err error) {
 		status := args["<status>"].(string)
 		slotFrom, err := strconv.Atoi(args["<slot_from>"].(string))
 		if err != nil {
-			log.Warning(err)
+			log.ErrorErrorf(err, "parse <slot_from> failed")
 			return errors.Trace(err)
 		}
 		slotTo, err := strconv.Atoi(args["<slot_to>"].(string))
 		if err != nil {
-			log.Warning(err)
+			log.ErrorErrorf(err, "parse <slot_to> failed")
 			return errors.Trace(err)
 		}
-		return runSlotRangeSet(slotFrom, slotTo, groupId, status)
+		return errors.Trace(runSlotRangeSet(slotFrom, slotTo, groupId, status))
 	}
 	return nil
 }
 
 func runSlotInit(isForce bool) error {
-	if !isForce {
-		p := models.GetSlotBasePath(productName)
-		exists, _, err := zkConn.Exists(p)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		if exists {
-			return errors.New("slots already exists. use -f flag to force init")
-		}
+	var v interface{}
+	url := "/api/slots/init"
+	if isForce {
+		url += "?is_force=1"
 	}
-	err := models.InitSlotSet(zkConn, productName, models.DEFAULT_SLOT_NUM)
+	err := callApi(METHOD_POST, url, nil, &v)
 	if err != nil {
 		return errors.Trace(err)
 	}
+	fmt.Println(jsonify(v))
 	return nil
 }
 
 func runSlotInfo(slotId int) error {
-	s, err := models.GetSlot(zkConn, productName, slotId)
+	var v interface{}
+	err := callApi(METHOD_GET, fmt.Sprintf("/api/slot/%d", slotId), nil, &v)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	b, _ := json.MarshalIndent(s, " ", "  ")
-	fmt.Println(string(b))
+	fmt.Println(jsonify(v))
 	return nil
 }
 
 func runSlotRangeSet(fromSlotId, toSlotId int, groupId int, status string) error {
-	err := models.SetSlotRange(zkConn, productName, fromSlotId, toSlotId, groupId, models.SlotStatus(status))
+	t := RangeSetTask{
+		FromSlot:   fromSlotId,
+		ToSlot:     toSlotId,
+		NewGroupId: groupId,
+		Status:     status,
+	}
+
+	var v interface{}
+	err := callApi(METHOD_POST, "/api/slot", t, &v)
 	if err != nil {
 		return errors.Trace(err)
 	}
+	fmt.Println(jsonify(v))
 	return nil
 }
 
 func runSlotSet(slotId int, groupId int, status string) error {
-	slot := models.NewSlot(productName, slotId)
-	slot.GroupId = groupId
-	slot.State.Status = models.SlotStatus(status)
-	ts := time.Now().Unix()
-	slot.State.LastOpTs = strconv.FormatInt(ts, 10)
-	if err := slot.Update(zkConn); err != nil {
-		return errors.Trace(err)
-	}
-	return nil
+	return runSlotRangeSet(slotId, slotId, groupId, status)
 }
 
 func runSlotMigrate(fromSlotId, toSlotId int, newGroupId int, delay int) error {
-	t := &MigrateTask{}
-	t.Delay = delay
-	t.FromSlot = fromSlotId
-	t.ToSlot = toSlotId
-	t.NewGroupId = newGroupId
-	t.Status = "migrating"
-	t.CreateAt = strconv.FormatInt(time.Now().Unix(), 10)
-	u, err := uuid.NewV4()
+	migrateInfo := &migrateTaskForm{
+		From:  fromSlotId,
+		To:    toSlotId,
+		Group: newGroupId,
+		Delay: delay,
+	}
+	var v interface{}
+	err := callApi(METHOD_POST, "/api/migrate", migrateInfo, &v)
 	if err != nil {
-		log.Warning(err)
-		return errors.Trace(err)
+		return err
 	}
-	t.Id = u.String()
-	t.stopChan = make(chan struct{})
-
-	// run migrate
-	if ok, err := preMigrateCheck(t); ok {
-		err = RunMigrateTask(t)
-		if err != nil {
-			log.Warning(err)
-			return errors.Trace(err)
-		}
-	} else {
-		log.Warning(err)
-		return errors.Trace(err)
-	}
+	fmt.Println(jsonify(v))
 	return nil
 }
 
 func runRebalance(delay int) error {
-	err := Rebalance(zkConn, delay)
+	var v interface{}
+	err := callApi(METHOD_POST, "/api/rebalance", nil, &v)
 	if err != nil {
-		log.Warning(err)
-		return errors.Trace(err)
+		return err
 	}
+	fmt.Println(jsonify(v))
 	return nil
 }

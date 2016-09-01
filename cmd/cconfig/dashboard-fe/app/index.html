@@ -202,6 +202,7 @@
               </tbody>
             </table>
           </div>
+          <div class="col-md-8"><highchart config="chartOps"></highchart></div>
         </div>
       </div>
 
@@ -215,7 +216,7 @@
           </div>
         </div>
         <div class="row">
-          <div class="col-md-9">
+          <div class="col-md-12">
                 <div class="panel panel-default" ng-repeat="group in server_groups | orderBy:'id'">
                   <div class="panel-heading">
                     <b>group_[[ group.id ]]</b>
@@ -278,37 +279,29 @@
             </h4>
             <p>
               <div class="btn-group btn-group-sm">
-                <button ng-if="rebalance_status.is_rebalancing == false" class="btn btn-default btn-sm btn-success" ng-click="rebalance()"><span class="glyphicon glyphicon-th-large"></span> Auto Rebalance </button>
-                <button disabled="disabled" ng-if="rebalance_status.is_rebalancing == true" class="btn btn-default btn-sm btn-success" ng-click="rebalance()"><span class="glyphicon glyphicon-th-large"></span> Rebalancing... </button>
+                <button class="btn btn-default btn-sm btn-success" ng-click="rebalance()"><span class="glyphicon glyphicon-th-large"></span> Auto Rebalance </button>
 
-              <button ng-if="rebalance_status.is_rebalancing == false" class="btn btn-default btn-sm" ng-click="migrate()"><span class="glyphicon glyphicon-plane"></span> Migrate Slot(s) </button>
+                <button class="btn btn-default btn-sm" ng-click="migrate()"><span class="glyphicon glyphicon-plane"></span> Migrate Slot(s) </button>
               </div>
             </p>
-            <table ng-if="migrate_status.migrate_task != null" class="table table-bordered">
-              <h5 ng-if="migrate_status.migrate_task != null" class="text-muted"> Migrate Task Info </h5>
+            <table class="table table-bordered" ng-if="migrate_tasks.length>0">
+              <h5 class="text-muted"> Migrate Task Info </h5>
               <thead>
                 <tr>
-                  <th>Migrate From</th>
-                  <th>Migrate To</th>
+                  <th>Migrate Slot</th>
                   <th>New Group</th>
                   <th>Create At</th>
                   <th>Status</th>
                   <th>Percent</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 <tr ng-repeat="task in migrate_tasks">
-                  <td> slot_[[ task.from ]] </td>
-                  <td> slot_[[ task.to ]] </td>
+                  <td> slot_[[ task.slot_id ]] </td>
                   <td> group_[[ task.new_group ]]</td>
                   <td> [[ task.create_at * 1000| date:'yyyy-MM-dd HH:mm:ss Z']]</td>
                   <td> [[ task.status]]</td>
                   <td> [[ task.percent ]] % </td>
-                  <td>
-                      <button ng-if="task.status == 'pending'" class="btn btn-sm btn-default" ng-click="removePendingTask(task)"> Remove </button> 
-                      <button ng-if="task.status == 'migrating'" class="btn btn-default btn-sm btn-danger" ng-click="stopRunningTask(task)"> Stop </button> 
-                  </td>
                 </tr>
               </tbody>  
             </table>
@@ -357,8 +350,15 @@
                 <tr ng-repeat="proxy in proxies">
                   <td> <p>[[proxy.id]]</p> </td>
                   <td> [[proxy.addr]] </td>
-                  <td> <a href="http://[[proxy.debug_var_addr]]" target="_blank">[[proxy.debug_var_addr]]</a> </td>
-                  <td> [[proxy.state]] </td>
+                  <td> <a href="http://[[proxy.debug_var_addr]]/debug/vars" target="_blank">[[proxy.debug_var_addr]]</a> </td>
+                  <td ng-switch="proxy.state">
+                    <span class="label label-success" ng-switch-when="online">
+                     [[proxy.state]]
+                    </span>
+                    <span class="label label-default" ng-switch-default>
+                     [[proxy.state]]
+                    </span>
+                   </td>
                   <td><button class="btn btn-default" ng-click="setStatus(proxy, 'online')">Mark Online</button>  <button class="btn btn-danger" ng-click="setStatus(proxy, 'mark_offline')">Mark Offline</button></td>
                 </tr>
               </tbody>
@@ -375,6 +375,10 @@
     <script src="bower_components/angular/angular.js"></script>
     <script src="bower_components/angular-bootstrap/ui-bootstrap-tpls.js"></script>
     <script src="bower_components/angular-resource/angular-resource.js"></script>
+    <script src="bower_components/highcharts-ng/dist/highcharts-ng.js"></script>
+    <script src="bower_components/highcharts/highcharts.js"></script>
+    <script src="bower_components/highcharts/highcharts-more.js"></script>
+    <script src="bower_components/highcharts/modules/exporting.js"></script>
     <!-- endbower -->
     <!-- endbuild -->
     <!-- build:js(.) scripts/plugins.js -->

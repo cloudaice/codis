@@ -1,4 +1,4 @@
-// Copyright 2014 Wandoujia Inc. All Rights Reserved.
+// Copyright 2016 CodisLabs. All Rights Reserved.
 // Licensed under the MIT (MIT-LICENSE.txt) license.
 
 package utils
@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 
-	log "github.com/ngaut/logging"
-
-	"github.com/ngaut/zkhelper"
-
 	"github.com/c4pt0r/cfg"
+	"github.com/wandoulabs/zkhelper"
+
+	"github.com/CodisLabs/codis/pkg/utils/errors"
+	"github.com/CodisLabs/codis/pkg/utils/log"
 )
 
 func InitConfig() (*cfg.Cfg, error) {
@@ -22,32 +22,23 @@ func InitConfig() (*cfg.Cfg, error) {
 	}
 	ret := cfg.NewCfg(configFile)
 	if err := ret.Load(); err != nil {
-		return nil, err
+		return nil, errors.Trace(err)
+	} else {
+		return ret, nil
 	}
-	return ret, nil
-}
-
-func InitConfigFromFile(filename string) (*cfg.Cfg, error) {
-	ret := cfg.NewCfg(filename)
-	if err := ret.Load(); err != nil {
-		return nil, err
-	}
-	return ret, nil
 }
 
 func GetZkLock(zkConn zkhelper.Conn, productName string) zkhelper.ZLocker {
 	zkPath := fmt.Sprintf("/zk/codis/db_%s/LOCK", productName)
-	ret := zkhelper.CreateMutex(zkConn, zkPath)
-	return ret
+	return zkhelper.CreateMutex(zkConn, zkPath)
 }
 
 func GetExecutorPath() string {
 	filedirectory := filepath.Dir(os.Args[0])
 	execPath, err := filepath.Abs(filedirectory)
 	if err != nil {
-		log.Fatal(err)
+		log.PanicErrorf(err, "get executor path failed")
 	}
-
 	return execPath
 }
 

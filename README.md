@@ -1,51 +1,40 @@
-#Codis - yet another fast distributed solution for Redis
+<img src="doc/pictures/logo-3.png" height=80></img>
 
-Codis is a proxy based high performance Redis cluster solution written in Go/C, an alternative to Twemproxy.
+[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/CodisLabs/codis?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Build Status](https://travis-ci.org/CodisLabs/codis.svg)](https://travis-ci.org/CodisLabs/codis)
 
-Codis supports multiple stateless proxy with multiple redis instances.
+Codis is a proxy based high performance Redis cluster solution written in Go. It is production-ready and widely used at [wandoujia.com](http://wandoujia.com) and many companies. You can see [Codis Releases](https://github.com/CodisLabs/codis/releases) for latest and most stable realeases.
 
-Codis is engineered to elastically scale, Easily add or remove redis or proxy instances on-demand/dynamicly.
+##Compared with Twemproxy and Redis Cluster
+<table>
+<tr><th></th><th>Codis</th><th>Twemproxy</th><th>Redis Cluster</th></tr>
+<tr><td>resharding without restarting cluster</td><td>Yes</td><td>No</td><td>Yes</td></tr>
+<tr><td>pipeline</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+<tr><td>hash tags for multi-key operations</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>multi-key operations while resharding</td><td>Yes</td><td>-</td><td>No(<a href="http://redis.io/topics/cluster-spec#multiple-keys-operations">details</a>)</td></tr>
+<tr><td>Redis clients supporting</td><td>Any clients</td><td>Any clients</td><td>Clients have to support cluster protocol</td></tr>
+</table>
+"Resharding" means migrating the data in one slot from one redis server to another, usually happens while increasing/decreasing the number of redis servers.
 
-Codis is production-ready and is widely used by [wandoujia.com](http://wandoujia.com).
-
-##Features
-* Auto rebalance
-* Extremely simple to use 
-* GUI dashboard & admin tools 
-* Supports most of Redis commands, Fully compatible with twemproxy(https://github.com/twitter/twemproxy)
-* Native Redis clients are supported
-* Safe and transparent data migration, Easily add or remove nodes on-demand.
-* Command-line interface is also provided
-* RESTful APIs
-
-## Build and Install
-
-* Install go & ZooKeeper
-* go get github.com/wandoulabs/codis
-* cd codis
-* ./bootstrap.sh
-* make gotest
-* cd sample
-* follow instructions in usage.md
+##Other Features
+* GUI website dashboard & admin tools
+* Supports most of Redis commands, Fully compatible with Twemproxy(https://github.com/twitter/twemproxy)
+* Proxies can register on zk/etcd, clients can avoid dead proxies, see "High Availability" section.
 
 ## Tutorial
 
-[简体中文](https://github.com/wandoulabs/codis/blob/master/doc/tutorial_zh.md)  
-[English](https://github.com/wandoulabs/codis/blob/master/doc/tutorial_en.md)
+[简体中文](doc/tutorial_zh.md)
+[English](doc/tutorial_en.md)
 
 ## FAQ
 
-[简体中文](https://github.com/wandoulabs/codis/blob/master/doc/FAQ_zh.md)  
-[English (WIP) ](https://github.com/wandoulabs/codis/blob/master/doc/FAQ_en.md)
+[简体中文](doc/FAQ_zh.md)
+[English (WIP) ](doc/FAQ_en.md)
 
-## Performance (Benchmark)
+## High Availability
 
-[简体中文](https://github.com/wandoulabs/codis/blob/master/doc/benchmark_zh.md)  
-English (WIP)
-
-## For Java users who want to support HA
-
-[Jodis \(HA Codis Connection Pool based on Jedis\)] (https://github.com/wandoulabs/codis/tree/master/ext/jodis)
+[简体中文](doc/tutorial_zh.md#ha)
+[English](doc/tutorial_en.md#ha)
 
 ## Architecture
 
@@ -62,16 +51,22 @@ Migrate
 Slots
 ![slots](doc/pictures/slots.png)
 
-## Authors
+##Benchmarks
+[See benchmark results](doc/benchmark.md)
 
-* [@goroutine](https://github.com/ngaut)
-* [@c4pt0r](https://github.com/c4pt0r)
-* [@spinlock9](https://github.com/spinlock)
+##Authors
+
+Active authors:
+* [@spinlock9](https://github.com/spinlock) [微博@斯宾洛克](http://weibo.com/spinlock9)
+* [@yangzhe1991](https://github.com/yangzhe1991) [微博@\_杨肉\_](http://weibo.com/yangzhe1991)
+
+Emeritus authors:
+* [@goroutine](https://github.com/ngaut) [微博@goroutine](http://weibo.com/u/1923497393)
+* [@c4pt0r](https://github.com/c4pt0r) [微博@Dongxu_Huang](http://weibo.com/c4pt0r)
 
 Thanks:
-
 * [@ivanzhaowy](https://github.com/ivanzhaowy)
-* [@Apache9](https://github.com/apache9)
+* [@Apache9](https://github.com/apache9) [微博@Apache9](http://weibo.com/u/1876829375)
 
 ## License
 

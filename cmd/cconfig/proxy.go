@@ -1,41 +1,31 @@
-// Copyright 2014 Wandoujia Inc. All Rights Reserved.
+// Copyright 2016 CodisLabs. All Rights Reserved.
 // Licensed under the MIT (MIT-LICENSE.txt) license.
 
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
-	"github.com/wandoulabs/codis/pkg/models"
-
 	"github.com/docopt/docopt-go"
-	log "github.com/ngaut/logging"
+
+	"github.com/CodisLabs/codis/pkg/models"
+	"github.com/CodisLabs/codis/pkg/utils/log"
 )
 
 func cmdProxy(argv []string) (err error) {
 	usage := `usage:
-	cconfig proxy list
-	cconfig proxy offline <proxy_name>
-	cconfig proxy online <proxy_name>
+	codis-config proxy list
+	codis-config proxy offline <proxy_name>
+	codis-config proxy online <proxy_name>
 `
 	args, err := docopt.Parse(usage, argv, true, "", false)
 	if err != nil {
-		log.Error(err)
+		log.ErrorErrorf(err, "parse args failed")
 		return err
 	}
-	log.Debug(args)
-
-	zkLock.Lock(fmt.Sprintf("proxy, %+v", argv))
-	defer func() {
-		err := zkLock.Unlock()
-		if err != nil {
-			log.Error(err)
-		}
-	}()
+	log.Debugf("parse args = {%+v}", args)
 
 	if args["list"].(bool) {
-		log.Warning(err)
 		return runProxyList()
 	}
 
@@ -50,20 +40,25 @@ func cmdProxy(argv []string) (err error) {
 }
 
 func runProxyList() error {
-	proxies, err := models.ProxyList(zkConn, productName, nil)
+	var v interface{}
+	err := callApi(METHOD_GET, "/api/proxy/list", nil, &v)
 	if err != nil {
-		log.Warning(err)
 		return err
 	}
-	b, _ := json.MarshalIndent(proxies, " ", "  ")
-	fmt.Println(string(b))
+	fmt.Println(jsonify(v))
 	return nil
 }
 
 func runSetProxyStatus(proxyName, status string) error {
-	if err := models.SetProxyStatus(zkConn, productName, proxyName, status); err != nil {
-		log.Warning(err)
+	info := models.ProxyInfo{
+		Id:    proxyName,
+		State: status,
+	}
+	var v interface{}
+	err := callApi(METHOD_POST, "/api/proxy", info, &v)
+	if err != nil {
 		return err
 	}
+	fmt.Println(jsonify(v))
 	return nil
 }

@@ -1,4 +1,4 @@
-// Copyright 2014 Wandoujia Inc. All Rights Reserved.
+// Copyright 2016 CodisLabs. All Rights Reserved.
 // Licensed under the MIT (MIT-LICENSE.txt) license.
 
 package models
@@ -9,14 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ngaut/zkhelper"
-
-	"github.com/wandoulabs/codis/pkg/utils"
-
-	"github.com/juju/errors"
+	"github.com/CodisLabs/codis/pkg/utils"
+	"github.com/CodisLabs/codis/pkg/utils/errors"
+	"github.com/CodisLabs/codis/pkg/utils/log"
+	"github.com/wandoulabs/zkhelper"
 )
-
-// redis server instance
 
 const (
 	SERVER_TYPE_MASTER  string = "master"
@@ -24,6 +21,7 @@ const (
 	SERVER_TYPE_OFFLINE string = "offline"
 )
 
+// redis server instance
 type Server struct {
 	Type    string `json:"type"`
 	GroupId int    `json:"group_id"`
@@ -32,17 +30,17 @@ type Server struct {
 
 // redis server group
 type ServerGroup struct {
-	Id          int      `json:"id"`
-	ProductName string   `json:"product_name"`
-	Servers     []Server `json:"servers"`
+	Id          int       `json:"id"`
+	ProductName string    `json:"product_name"`
+	Servers     []*Server `json:"servers"`
 }
 
-func (self Server) String() string {
+func (self *Server) String() string {
 	b, _ := json.MarshalIndent(self, "", "  ")
 	return string(b)
 }
 
-func (self ServerGroup) String() string {
+func (self *ServerGroup) String() string {
 	b, _ := json.MarshalIndent(self, "", "  ")
 	return string(b) + "\n"
 }
@@ -74,12 +72,29 @@ func NewServerGroup(productName string, id int) *ServerGroup {
 	}
 }
 
+func GroupExists(zkConn zkhelper.Conn, productName string, groupId int) (bool, error) {
+	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d", productName, groupId)
+	exists, _, err := zkConn.Exists(zkPath)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	return exists, nil
+}
+
 func GetGroup(zkConn zkhelper.Conn, productName string, groupId int) (*ServerGroup, error) {
+	exists, err := GroupExists(zkConn, productName, groupId)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	if !exists {
+		return nil, errors.Errorf("group %d is not found", groupId)
+	}
+
 	group := &ServerGroup{
 		ProductName: productName,
 		Id:          groupId,
 	}
-	var err error
+
 	group.Servers, err = group.GetServers(zkConn)
 	if err != nil {
 		return nil, errors.Trace(err)
@@ -87,9 +102,8 @@ func GetGroup(zkConn zkhelper.Conn, productName string, groupId int) (*ServerGro
 	return group, nil
 }
 
-func ServerGroups(zkConn zkhelper.Conn, productName string) ([]ServerGroup, error) {
-	//ret := make(map[int][]*Server)
-	var ret []ServerGroup
+func ServerGroups(zkConn zkhelper.Conn, productName string) ([]*ServerGroup, error) {
+	var ret []*ServerGroup
 	root := fmt.Sprintf("/zk/codis/db_%s/servers", productName)
 	groups, _, err := zkConn.Children(root)
 	if err != nil {
@@ -109,7 +123,7 @@ func ServerGroups(zkConn zkhelper.Conn, productName string) ([]ServerGroup, erro
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		ret = append(ret, *g)
+		ret = append(ret, g)
 	}
 	return ret, nil
 }
@@ -122,7 +136,7 @@ func (self *ServerGroup) Master(zkConn zkhelper.Conn) (*Server, error) {
 	for _, s := range servers {
 		// TODO check if there are two masters
 		if s.Type == SERVER_TYPE_MASTER {
-			return &s, nil
+			return s, nil
 		}
 	}
 	return nil, nil
@@ -137,29 +151,45 @@ func (self *ServerGroup) Remove(zkConn zkhelper.Conn) error {
 
 	for _, slot := range slots {
 		if slot.GroupId == self.Id {
-			return errors.AlreadyExistsf("group %d is using by slot %d", slot.GroupId, slot.Id)
+			return errors.Errorf("group %d is using by slot %d", slot.GroupId, slot.Id)
+		}
+		if (slot.State.Status == SLOT_STATUS_MIGRATE || slot.State.Status == SLOT_STATUS_PRE_MIGRATE) && slot.State.MigrateStatus.From == self.Id {
+			return errors.Errorf("slot %d has residual data remain in group %d", slot.Id, self.Id)
 		}
 	}
 
-	// do delte
+	// do delete
 	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d", self.ProductName, self.Id)
 	err = zkhelper.DeleteRecursive(zkConn, zkPath, -1)
 
+	// we know that there's no slots affected, so this action doesn't need proxy confirm
 	err = NewAction(zkConn, self.ProductName, ACTION_TYPE_SERVER_GROUP_REMOVE, self, "", false)
 	return errors.Trace(err)
 }
 
-func (self *ServerGroup) RemoveServer(zkConn zkhelper.Conn, s Server) error {
-	if s.Type == SERVER_TYPE_MASTER {
-		return errors.New("cannot remove master, use promote first")
-	}
-
-	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d/%s", self.ProductName, self.Id, s.Addr)
-	err := zkConn.Delete(zkPath, -1)
+func (self *ServerGroup) RemoveServer(zkConn zkhelper.Conn, addr string) error {
+	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d/%s", self.ProductName, self.Id, addr)
+	data, _, err := zkConn.Get(zkPath)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
+	var s Server
+	err = json.Unmarshal(data, &s)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	log.Info(s)
+	if s.Type == SERVER_TYPE_MASTER {
+		return errors.Errorf("cannot remove master, use promote first")
+	}
+
+	err = zkConn.Delete(zkPath, -1)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// update server list
 	for i := 0; i < len(self.Servers); i++ {
 		if self.Servers[i].Addr == s.Addr {
 			self.Servers = append(self.Servers[:i], self.Servers[i+1:]...)
@@ -167,12 +197,13 @@ func (self *ServerGroup) RemoveServer(zkConn zkhelper.Conn, s Server) error {
 		}
 	}
 
+	// remove slave won't need proxy confirm
 	err = NewAction(zkConn, self.ProductName, ACTION_TYPE_SERVER_GROUP_CHANGED, self, "", false)
 	return errors.Trace(err)
 }
 
-func (self *ServerGroup) Promote(conn zkhelper.Conn, addr string) error {
-	var s Server
+func (self *ServerGroup) Promote(conn zkhelper.Conn, addr, passwd string) error {
+	var s *Server
 	exists := false
 	for i := 0; i < len(self.Servers); i++ {
 		if self.Servers[i].Addr == addr {
@@ -183,10 +214,10 @@ func (self *ServerGroup) Promote(conn zkhelper.Conn, addr string) error {
 	}
 
 	if !exists {
-		return errors.NotFoundf("no such addr %s", addr)
+		return errors.Errorf("no such addr %s", addr)
 	}
 
-	err := utils.SlaveNoOne(s.Addr)
+	err := utils.SlaveNoOne(s.Addr, passwd)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -200,7 +231,7 @@ func (self *ServerGroup) Promote(conn zkhelper.Conn, addr string) error {
 	// old master may be nil
 	if master != nil {
 		master.Type = SERVER_TYPE_OFFLINE
-		err = self.AddServer(conn, master)
+		err = self.AddServer(conn, master, passwd)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -208,13 +239,13 @@ func (self *ServerGroup) Promote(conn zkhelper.Conn, addr string) error {
 
 	// promote new server to master
 	s.Type = SERVER_TYPE_MASTER
-	err = self.AddServer(conn, &s)
+	err = self.AddServer(conn, s, passwd)
 	return errors.Trace(err)
 }
 
 func (self *ServerGroup) Create(zkConn zkhelper.Conn) error {
 	if self.Id < 0 {
-		return errors.NotSupportedf("invalid server group id %d", self.Id)
+		return errors.Errorf("invalid server group id %d", self.Id)
 	}
 	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d", self.ProductName, self.Id)
 	_, err := zkhelper.CreateOrUpdate(zkConn, zkPath, "", 0, zkhelper.DefaultDirACLs(), true)
@@ -224,12 +255,6 @@ func (self *ServerGroup) Create(zkConn zkhelper.Conn) error {
 	err = NewAction(zkConn, self.ProductName, ACTION_TYPE_SERVER_GROUP_CHANGED, self, "", false)
 	if err != nil {
 		return errors.Trace(err)
-	}
-
-	// set no server slots' group id to this server group, no need to return error
-	slots, err := NoGroupSlots(zkConn, self.ProductName)
-	if err == nil && len(slots) > 0 {
-		SetSlots(zkConn, self.ProductName, slots, self.Id, SLOT_STATUS_ONLINE)
 	}
 
 	return nil
@@ -246,31 +271,43 @@ func (self *ServerGroup) Exists(zkConn zkhelper.Conn) (bool, error) {
 
 var ErrNodeExists = errors.New("node already exists")
 
-func (self *ServerGroup) AddServer(zkConn zkhelper.Conn, s *Server) error {
+func (self *ServerGroup) AddServer(zkConn zkhelper.Conn, s *Server, passwd string) error {
 	s.GroupId = self.Id
+
+	servers, err := self.GetServers(zkConn)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	var masterAddr string
+	for _, server := range servers {
+		if server.Type == SERVER_TYPE_MASTER {
+			masterAddr = server.Addr
+		}
+	}
+
+	// make sure there is only one master
+	if s.Type == SERVER_TYPE_MASTER && len(masterAddr) > 0 {
+		return errors.Trace(ErrNodeExists)
+	}
+
+	// if this group has no server. auto promote this server to master
+	if len(servers) == 0 {
+		s.Type = SERVER_TYPE_MASTER
+	}
+
 	val, err := json.Marshal(s)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
-	if s.Type == SERVER_TYPE_MASTER {
-		// make sure there is only one master
-		servers, err := self.GetServers(zkConn)
-		if err != nil {
-			return errors.Trace(err)
-		}
-		for _, server := range servers {
-			if server.Type == SERVER_TYPE_MASTER {
-				return errors.Trace(ErrNodeExists)
-			}
-		}
-	}
-
 	zkPath := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d/%s", self.ProductName, self.Id, s.Addr)
 	_, err = zkhelper.CreateOrUpdate(zkConn, zkPath, string(val), 0, zkhelper.DefaultFileACLs(), true)
+	if err != nil {
+		return errors.Trace(err)
+	}
 
 	// update servers
-	servers, err := self.GetServers(zkConn)
+	servers, err = self.GetServers(zkConn)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -281,13 +318,19 @@ func (self *ServerGroup) AddServer(zkConn zkhelper.Conn, s *Server) error {
 		if err != nil {
 			return errors.Trace(err)
 		}
+	} else if s.Type == SERVER_TYPE_SLAVE && len(masterAddr) > 0 {
+		// send command slaveof to slave
+		err := utils.SlaveOf(s.Addr, passwd, masterAddr)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 
 	return nil
 }
 
-func (self *ServerGroup) GetServers(zkConn zkhelper.Conn) ([]Server, error) {
-	var ret []Server
+func (self *ServerGroup) GetServers(zkConn zkhelper.Conn) ([]*Server, error) {
+	var ret []*Server
 	root := fmt.Sprintf("/zk/codis/db_%s/servers/group_%d", self.ProductName, self.Id)
 	nodes, _, err := zkConn.Children(root)
 	if err != nil {
@@ -299,7 +342,7 @@ func (self *ServerGroup) GetServers(zkConn zkhelper.Conn) ([]Server, error) {
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		ret = append(ret, *s)
+		ret = append(ret, s)
 	}
 	return ret, nil
 }
